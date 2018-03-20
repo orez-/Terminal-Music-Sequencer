@@ -5,7 +5,7 @@ import math
 import pyaudio
 
 
-BITRATE = 16000
+BITRATE = 44100
 
 SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 fixed_note, fixed_octave, fixed_freq = SCALE.index('A'), 4, 440
@@ -66,18 +66,18 @@ class Sequencer:
             ]
             for notes in self._notes
         ), bool)
-        wavedata = ''.join(
-            chr(int(sum(
-                math.sin(x/((BITRATE/freq)/math.pi))*127+128
+        wavedata = (
+            sorted([0, int(sum(
+                math.sin(x/((BITRATE/freq)/math.pi))
                 for freq in freqs
-            ))) if freqs else chr(128)
+            ) * 100 + 128), 255])[1] if freqs else 128
             for freqs in song_freqs
             for x in range(NUMBER_OF_FRAMES)
         )
-        stream.write(wavedata)
-        # stream.stop_stream()
-        # stream.close()
-        # _p.terminate()
+        stream.write(bytes(wavedata))
+        stream.stop_stream()
+        stream.close()
+        _p.terminate()
 
 
 class Board:
