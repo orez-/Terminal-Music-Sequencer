@@ -8,7 +8,7 @@ import pyaudio
 BITRATE = 44100
 
 SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-fixed_note, fixed_octave, fixed_freq = SCALE.index('A'), 4, 440
+fixed_note, fixed_octave, fixed_freq = SCALE.index('A'), 4, 880
 A = 2 ** (1 / 12)
 
 
@@ -58,7 +58,6 @@ class Sequencer:
             output=True,
         )
         length = 1 / 6
-        NUMBER_OF_FRAMES = int(BITRATE * length)
         song_freqs = iter_rstrip((
             [
                 get_freq(note, octave)
@@ -67,18 +66,47 @@ class Sequencer:
             for notes in self._notes
         ), bool)
         wavedata = (
-            sorted([0, int(sum(
-                math.sin(x/((BITRATE/freq)/math.pi))
-                for freq in freqs
-            ) * 100 + 128), 255])[1] if freqs else 128
+            note
             for freqs in song_freqs
-            for x in range(NUMBER_OF_FRAMES)
+            for note in get_note_form(freqs, length)
         )
         stream.write(bytes(wavedata))
         stream.stop_stream()
         stream.close()
         _p.terminate()
 
+
+def clamp(low, num, high):
+    return sorted([low, num, high])[1]
+
+
+def interpolate(num_frames, shape):
+    s = iter(sorted(shape.items()))
+    time1, amp1 = next(s)
+    for x in range(num_frames):
+        frac = x / num_frames
+        while frac >= time1:
+            time0, amp0 = time1, amp1
+            time1, amp1 = next(s)
+        yield (frac - time0) * (amp1 - amp0) / (time1 - time0) + amp0
+
+
+def get_note_form(freqs, length=1/6):
+    NUMBER_OF_FRAMES = int(BITRATE * length)
+    if not freqs:
+        for _ in range(NUMBER_OF_FRAMES):
+            yield 128
+        return
+    for x, amp in enumerate(interpolate(NUMBER_OF_FRAMES, {0.0: 0.0, 0.005: 1.0, 0.25: 0.5, 0.9: 0.1, 1.0: 0.0})):
+        num = sum(
+            math.sin(x / ((BITRATE / freq) / math.pi))
+            for freq in freqs
+        ) * amp
+
+        yield clamp(0, int(num * 100 + 128), 255)
+
+
+GRAY_ID = 13
 
 class Board:
     """
@@ -88,36 +116,36 @@ class Board:
         self._sequencer = Sequencer()
 
     def _get_note(self, y):
-        return "BAGFEDC"[y % 7]
+        return SCALE[::-1][y % len(SCALE)]
 
     def _to_y(self, note, octave):
-        return "BAGFEDC".index(note) + (5 - octave) * 7
+        return SCALE[::-1].index(note) + (5 - octave) * len(SCALE)
 
     def draw(self, screen):
-        for y in range(21):
-            attr = 0 if (y + 1) % 7 else curses.A_UNDERLINE
+        for y in range(3 * len(SCALE)):
+            attr = 0 if (y + 1) % len(SCALE) else curses.A_UNDERLINE
             for x in range(16):
                 screen.addstr(y, x * 4, '--', attr)
-                screen.addstr(y, x * 4 + 2, '--', attr | curses.color_pair(8))
+                screen.addstr(y, x * 4 + 2, '--', attr | curses.color_pair(GRAY_ID))
         for x, column in enumerate(self._sequencer._notes):
             for note, octave in column:
                 self._draw_note(screen, x, self._to_y(note, octave))
 
     def _draw_note(self, screen, x, y, is_note=True):
         if is_note:
-            char = self._get_note(y)
-            color = curses.color_pair(-y % 7 or 7)
+            char = self._get_note(y)[-1]
+            color = curses.color_pair(-y % len(SCALE) or len(SCALE))
         else:
             char = '-'
-            color = curses.color_pair(0 if x % 4 < 2 else 8)
+            color = curses.color_pair(0 if x % 4 < 2 else GRAY_ID)
         screen.addstr(
-            y, x, char, (0 if (y + 1) % 7 else curses.A_UNDERLINE) | color)
+            y, x, char, (0 if (y + 1) % len(SCALE) else curses.A_UNDERLINE) | color)
 
     def handle_click(self, *, mx, my, screen):
-        if not (0 <= mx < 64 and 0 <= my < 21):
+        if not (0 <= mx < 64 and 0 <= my < 3 * len(SCALE)):
             return
 
-        octave = 5 - my // 7
+        octave = 5 - my // len(SCALE)
         note = self._get_note(my)
 
         is_note = self._sequencer.toggle_note(mx, (note, octave))
@@ -141,14 +169,19 @@ def main():
         screen.keypad(1)
         curses.mousemask(1)
 
-        curses.init_pair(1, 161, 0)
-        curses.init_pair(2, 209, 0)
-        curses.init_pair(3, 185, 0)
-        curses.init_pair(4, 106, 0)
-        curses.init_pair(5, 72, 0)
-        curses.init_pair(6, 62, 0)
-        curses.init_pair(7, 132, 0)
-        curses.init_pair(8, 8, 0)
+        curses.init_pair(1, 161, 0)  # C
+        curses.init_pair(2, 203, 0)
+        curses.init_pair(3, 209, 0)
+        curses.init_pair(4, 214, 0)
+        curses.init_pair(5, 185, 0)
+        curses.init_pair(6, 106, 0)
+        curses.init_pair(7, 71, 0)
+        curses.init_pair(8, 72, 0)
+        curses.init_pair(9, 67, 0)
+        curses.init_pair(10, 62, 0)
+        curses.init_pair(11, 97, 0)
+        curses.init_pair(12, 132, 0)
+        curses.init_pair(GRAY_ID, 8, 0)
         board.draw(screen)
 
         while True:
@@ -156,7 +189,8 @@ def main():
             if event == ord("q"): break
             elif event == curses.KEY_MOUSE:
                 _, mx, my, _, btype = curses.getmouse()
-                board.handle_click(mx=mx, my=my, screen=screen)
+                if btype == curses.BUTTON1_RELEASED:
+                    board.handle_click(mx=mx, my=my, screen=screen)
             else:
                 board.handle_key(event)
     finally:
