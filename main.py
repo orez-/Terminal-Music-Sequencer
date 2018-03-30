@@ -112,24 +112,41 @@ class Board:
     """
     Interface between terminal and sequencer model.
     """
+    OFFSET_X = 1
+
     def __init__(self):
+        self._octave_min = 3
+        self._octave_max = 5
+        self._octave_range = self._octave_max + 1 - self._octave_min
+
         self._sequencer = Sequencer()
+        self._scroll = 0
 
     def _get_note(self, y):
         return SCALE[::-1][y % len(SCALE)]
 
     def _to_y(self, note, octave):
-        return SCALE[::-1].index(note) + (5 - octave) * len(SCALE)
+        return SCALE[::-1].index(note) + (self._octave_max - octave) * len(SCALE)
 
     def draw(self, screen):
-        for y in range(3 * len(SCALE)):
+        for y in range(self._octave_range * len(SCALE)):
+            # leading line
+            screen.addstr(y, 0, ' ' if self._scroll else '│')
+            # horizontal lines
             attr = 0 if (y + 1) % len(SCALE) else curses.A_UNDERLINE
             for x in range(16):
-                screen.addstr(y, x * 4, '--', attr)
-                screen.addstr(y, x * 4 + 2, '--', attr | curses.color_pair(GRAY_ID))
+                screen.addstr(y, self.OFFSET_X + x * 4, '--', attr)
+                screen.addstr(y, self.OFFSET_X + x * 4 + 2, '--', attr | curses.color_pair(GRAY_ID))
+        # Scroll display
+        if self._scroll:
+            for y in range(1, self._octave_range):
+                screen.addstr(y * len(SCALE) - 1, 0, '<')
+                screen.addstr(y * len(SCALE), 0, '<')
+        # Notes!
         for x, column in enumerate(self._sequencer._notes):
-            for note, octave in column:
-                self._draw_note(screen, x, self._to_y(note, octave))
+            if 0 <= x - self._scroll < 64:
+                for note, octave in column:
+                    self._draw_note(screen, x - self._scroll + self.OFFSET_X, self._to_y(note, octave))
 
     def _draw_note(self, screen, x, y, is_note=True):
         if is_note:
@@ -142,21 +159,28 @@ class Board:
             y, x, char, (0 if (y + 1) % len(SCALE) else curses.A_UNDERLINE) | color)
 
     def handle_click(self, *, mx, my, screen):
-        if not (0 <= mx < 64 and 0 <= my < 3 * len(SCALE)):
+        if not (0 <= mx - self.OFFSET_X < 64 and 0 <= my < self._octave_range * len(SCALE)):
             return
 
-        octave = 5 - my // len(SCALE)
+        octave = self._octave_max - my // len(SCALE)
         note = self._get_note(my)
 
-        is_note = self._sequencer.toggle_note(mx, (note, octave))
+        is_note = self._sequencer.toggle_note(mx + self._scroll - self.OFFSET_X, (note, octave))
         self._draw_note(screen, mx, my, is_note)
 
-    def handle_key(self, event):
+    def handle_key(self, event, screen):
         if event == ord(' '):
             self._sequencer.play_song()
         elif event == ord('s'):
             with open('song.txt', 'w') as file:
                 file.write(repr(self._sequencer._notes))
+        elif event == ord('a'):
+            if self._scroll > 0:
+                self._scroll -= 4
+                self.draw(screen)
+        elif event == ord('d'):
+            self._scroll += 4
+            self.draw(screen)
 
 
 def main():
@@ -192,7 +216,7 @@ def main():
                 if btype == curses.BUTTON1_RELEASED:
                     board.handle_click(mx=mx, my=my, screen=screen)
             else:
-                board.handle_key(event)
+                board.handle_key(event, screen)
     finally:
         curses.endwin()
 
