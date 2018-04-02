@@ -18,17 +18,6 @@ def get_freq(note, octave=4):
     return fixed_freq * (A ** half_step_delta)
 
 
-def iter_rstrip(iterable, predicate):
-    buffer = collections.deque()
-    for elem in iterable:
-        if predicate(elem):
-            yield from buffer
-            yield elem
-            buffer.clear()
-        else:
-            buffer.append(elem)
-
-
 class Sequencer:
     """
     Track notes to play.
@@ -36,9 +25,21 @@ class Sequencer:
     def __init__(self):
         try:
             with open('song.txt', 'r') as file:
-                self._notes = eval(file.read())
+                data = eval(file.read())
+            if isinstance(data, list):
+                data = {k: v for k, v in enumerate(data) if v}
+            self._notes = collections.defaultdict(set, data)
         except OSError:
-            self._notes = [set() for _ in range(64)]
+            self._notes = collections.defaultdict(set)
+
+        _p = pyaudio.PyAudio()
+        self._stream = _p.open(
+            format=_p.get_format_from_width(1),
+            channels=1,
+            rate=BITRATE,
+            frames_per_buffer=2048,
+            output=True,
+        )
 
     def toggle_note(self, x, note):
         """
@@ -46,34 +47,44 @@ class Sequencer:
         """
         note_set = self._notes[x]
         note_set ^= {note}
+        if not note_set:
+            del self._notes[x]
         return note in note_set
 
+    def song_notes(self):
+        notes = sorted(self._notes.items())
+        if not notes:
+            return
+        last, _ = notes[-1]
+        notes = iter(notes)
+        next_key, next_value = next(notes)
+        for key in range(last + 1):
+            if key == next_key:
+                yield next_value
+                next_key, next_value = next(notes)
+            else:
+                yield frozenset()
+
     def play_song(self):
-        _p = pyaudio.PyAudio()
-        stream = _p.open(
-            format=_p.get_format_from_width(1),
-            channels=1,
-            rate=BITRATE,
-            frames_per_buffer=2048,
-            output=True,
-        )
         length = 1 / 6
-        song_freqs = iter_rstrip((
+        song_freqs = (
             [
                 get_freq(note, octave)
                 for note, octave in notes
             ]
-            for notes in self._notes
-        ), bool)
+            for notes in self.song_notes()
+        )
         wavedata = (
             note
             for freqs in song_freqs
             for note in get_note_form(freqs, length)
         )
-        stream.write(bytes(wavedata))
-        stream.stop_stream()
-        stream.close()
-        _p.terminate()
+        self._stream.write(bytes(wavedata))
+
+    def play_note(self, note, octave):
+        length = 1 / 6
+        wavedata = get_note_form([get_freq(note, octave)], length)
+        self._stream.write(bytes(wavedata))
 
 
 def clamp(low, num, high):
@@ -143,7 +154,7 @@ class Board:
                 screen.addstr(y * len(SCALE) - 1, 0, '<')
                 screen.addstr(y * len(SCALE), 0, '<')
         # Notes!
-        for x, column in enumerate(self._sequencer._notes):
+        for x, column in self._sequencer._notes.items():
             if 0 <= x - self._scroll < 64:
                 for note, octave in column:
                     self._draw_note(screen, x - self._scroll + self.OFFSET_X, self._to_y(note, octave))
@@ -166,6 +177,8 @@ class Board:
         note = self._get_note(my)
 
         is_note = self._sequencer.toggle_note(mx + self._scroll - self.OFFSET_X, (note, octave))
+        if is_note:
+            self._sequencer.play_note(note, octave)
         self._draw_note(screen, mx, my, is_note)
 
     def handle_key(self, event, screen):
@@ -173,7 +186,7 @@ class Board:
             self._sequencer.play_song()
         elif event == ord('s'):
             with open('song.txt', 'w') as file:
-                file.write(repr(self._sequencer._notes))
+                file.write(repr(dict(self._sequencer._notes)))
         elif event == ord('a'):
             if self._scroll > 0:
                 self._scroll -= 4
