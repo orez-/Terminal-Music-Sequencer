@@ -23,15 +23,6 @@ class Sequencer:
     Track notes to play.
     """
     def __init__(self):
-        try:
-            with open('song.txt', 'r') as file:
-                data = eval(file.read())
-            if isinstance(data, list):
-                data = {k: v for k, v in enumerate(data) if v}
-            self._notes = collections.defaultdict(set, data)
-        except OSError:
-            self._notes = collections.defaultdict(set)
-
         _p = pyaudio.PyAudio()
         self._stream = _p.open(
             format=_p.get_format_from_width(1),
@@ -40,6 +31,26 @@ class Sequencer:
             frames_per_buffer=2048,
             output=True,
         )
+        self._noteforms = {}
+        self._notebytes = {}
+        self._generate_noteforms()
+        self._song_wavedata = None
+
+        try:
+            with open('song.txt', 'r') as file:
+                data = eval(file.read())
+            if isinstance(data, list):
+                data = {k: v for k, v in enumerate(data) if v}
+            self._notes = collections.defaultdict(set, data)
+            self.compile_song()
+        except OSError:
+            self._notes = collections.defaultdict(set)
+
+    def _generate_noteforms(self):
+        for octave in range(3, 6):
+            for note in SCALE:
+                nf = self._noteforms[note, octave] = list(get_note_form(get_freq(note, octave)))
+                self._notebytes[note, octave] = bytes(map(sin_to_byte, nf))
 
     def toggle_note(self, x, note):
         """
@@ -49,6 +60,7 @@ class Sequencer:
         note_set ^= {note}
         if not note_set:
             del self._notes[x]
+        self._song_wavedata = None  # clear the song cache.
         return note in note_set
 
     def song_notes(self):
@@ -65,26 +77,27 @@ class Sequencer:
             else:
                 yield frozenset()
 
-    def play_song(self):
-        length = 1 / 6
+    def compile_song(self):
         song_freqs = (
-            [
-                get_freq(note, octave)
-                for note, octave in notes
-            ]
-            for notes in self.song_notes()
+            zip(*[
+                self._noteforms[note]
+                for note in note_group
+            ])
+            for note_group in self.song_notes()
         )
-        wavedata = (
-            note
+        self._song_wavedata = [
+            sin_to_byte(sum(group))
             for freqs in song_freqs
-            for note in get_note_form(freqs, length)
-        )
-        self._stream.write(bytes(wavedata))
+            for group in freqs
+        ]
+
+    def play_song(self):
+        if self._song_wavedata is None:
+            self.compile_song()
+        self._stream.write(bytes(self._song_wavedata))
 
     def play_note(self, note, octave):
-        length = 1 / 6
-        wavedata = get_note_form([get_freq(note, octave)], length)
-        self._stream.write(bytes(wavedata))
+        self._stream.write(self._notebytes[note, octave])
 
 
 def clamp(low, num, high):
@@ -102,19 +115,14 @@ def interpolate(num_frames, shape):
         yield (frac - time0) * (amp1 - amp0) / (time1 - time0) + amp0
 
 
-def get_note_form(freqs, length=1/6):
+def get_note_form(freq, length=1/6):
     NUMBER_OF_FRAMES = int(BITRATE * length)
-    if not freqs:
-        for _ in range(NUMBER_OF_FRAMES):
-            yield 128
-        return
     for x, amp in enumerate(interpolate(NUMBER_OF_FRAMES, {0.0: 0.0, 0.005: 1.0, 0.25: 0.5, 0.9: 0.1, 1.0: 0.0})):
-        num = sum(
-            math.sin(x / ((BITRATE / freq) / math.pi))
-            for freq in freqs
-        ) * amp
+        yield math.sin(x / ((BITRATE / freq) / math.pi)) * amp
 
-        yield clamp(0, int(num * 100 + 128), 255)
+
+def sin_to_byte(sin_val):
+    return clamp(0, int(sin_val * 100 + 128), 255)
 
 
 GRAY_ID = 13
@@ -197,6 +205,7 @@ class Board:
 
 
 def main():
+    print("please wait...")
     board = Board()
     try:
         screen = curses.initscr()
