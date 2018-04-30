@@ -11,6 +11,7 @@ REST = None
 SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 fixed_note, fixed_octave, fixed_freq = SCALE.index('A'), 4, 880
 A = 2 ** (1 / 12)
+sqrt3 = 3 ** 0.5
 
 
 def get_freq(note, octave=4):
@@ -121,7 +122,9 @@ def interpolate(num_frames, shape):
 def get_note_form(freq, length=1/6):
     NUMBER_OF_FRAMES = int(BITRATE * length)
     for x, amp in enumerate(interpolate(NUMBER_OF_FRAMES, {0.0: 0.0, 0.005: 1.0, 0.25: 0.5, 0.9: 0.1, 1.0: 0.0})):
-        yield math.sin(x / ((BITRATE / freq) / math.pi)) * amp
+        # "piano": https://dsp.stackexchange.com/a/46606
+        x /= (BITRATE / freq)
+        yield (0.25 * math.sin(3 * math.pi * x) + 0.25 * math.sin(math.pi * x) + sqrt3 / 2 * math.cos(math.pi * x)) * amp
 
 
 def sin_to_byte(sin_val):
