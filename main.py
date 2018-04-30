@@ -7,6 +7,7 @@ import pyaudio
 
 BITRATE = 44100
 
+REST = None
 SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 fixed_note, fixed_octave, fixed_freq = SCALE.index('A'), 4, 880
 A = 2 ** (1 / 12)
@@ -51,6 +52,8 @@ class Sequencer:
             for note in SCALE:
                 nf = self._noteforms[note, octave] = list(get_note_form(get_freq(note, octave)))
                 self._notebytes[note, octave] = bytes(map(sin_to_byte, nf))
+        NUMBER_OF_FRAMES = int(BITRATE * 1/6)
+        self._noteforms[REST] = [0] * NUMBER_OF_FRAMES
 
     def toggle_note(self, x, note):
         """
@@ -75,7 +78,7 @@ class Sequencer:
                 yield next_value
                 next_key, next_value = next(notes)
             else:
-                yield frozenset()
+                yield [REST]
 
     def compile_song(self):
         song_freqs = (
