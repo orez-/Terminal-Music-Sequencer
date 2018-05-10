@@ -179,7 +179,7 @@ class Board:
             color = curses.color_pair(-y % len(SCALE) or len(SCALE))
         else:
             char = '-'
-            color = curses.color_pair(0 if x % 4 < 2 else GRAY_ID)
+            color = curses.color_pair(0 if (x - self.OFFSET_X) % 4 < 2 else GRAY_ID)
         screen.addstr(
             y, x, char, (0 if (y + 1) % len(SCALE) else curses.A_UNDERLINE) | color)
 
