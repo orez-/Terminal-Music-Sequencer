@@ -1,3 +1,5 @@
+from __future__ import generator_stop
+
 import collections
 import curses
 import math
@@ -77,7 +79,10 @@ class Sequencer:
         for key in range(last + 1):
             if key == next_key:
                 yield next_value
-                next_key, next_value = next(notes)
+                try:
+                    next_key, next_value = next(notes)
+                except StopIteration:
+                    return
             else:
                 yield [REST]
 
