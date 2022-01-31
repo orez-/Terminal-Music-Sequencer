@@ -3,6 +3,7 @@ from __future__ import generator_stop
 import collections
 import curses
 import math
+import sys
 
 import pyaudio
 
@@ -40,8 +41,11 @@ class Sequencer:
         self._generate_noteforms()
         self._song_wavedata = None
 
+    @classmethod
+    def from_file(cls, filename):
+        self = cls()
         try:
-            with open('song.txt', 'r') as file:
+            with open(filename, 'r') as file:
                 data = eval(file.read())
             if isinstance(data, list):
                 data = {k: v for k, v in enumerate(data) if v}
@@ -49,6 +53,7 @@ class Sequencer:
             self.compile_song()
         except OSError:
             self._notes = collections.defaultdict(set)
+        return self
 
     def _generate_noteforms(self):
         for octave in range(3, 6):
@@ -144,13 +149,14 @@ class Board:
     """
     OFFSET_X = 1
 
-    def __init__(self):
+    def __init__(self, filename):
         self._octave_min = 3
         self._octave_max = 5
         self._octave_range = self._octave_max + 1 - self._octave_min
 
-        self._sequencer = Sequencer()
+        self._sequencer = Sequencer.from_file(filename)
         self._scroll = 0
+        self._filename = filename
 
     def _get_note(self, y):
         return SCALE[::-1][y % len(SCALE)]
@@ -204,7 +210,7 @@ class Board:
         if event == ord(' '):
             self._sequencer.play_song()
         elif event == ord('s'):
-            with open('song.txt', 'w') as file:
+            with open(self._filename, 'w') as file:
                 file.write(repr(dict(self._sequencer._notes)))
         elif event == ord('a'):
             if self._scroll > 0:
@@ -217,7 +223,8 @@ class Board:
 
 def main():
     print("please wait...")
-    board = Board()
+    filename = sys.argv[1] if len(sys.argv) > 1 else 'song.txt'
+    board = Board(filename)
     try:
         screen = curses.initscr()
         curses.start_color()
